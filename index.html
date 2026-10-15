@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://api.github.com https://gist.githubusercontent.com; img-src data:; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Paste Board</title>
+  <style>
+    :root {
+      --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7280;
+      --border: #d9dde4; --accent: #2563eb; --accent-text: #ffffff; --ok: #15803d; --err: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12151b; --panel: #1b1f27; --text: #e6e8ec; --muted: #9aa3b2;
+        --border: #2e3440; --accent: #3b82f6; --ok: #4ade80; --err: #f87171;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 900px; margin: 0 auto; padding: 24px 16px; display: flex; flex-direction: column; gap: 12px; min-height: 100vh; }
+    header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+    h1 { font-size: 20px; margin: 0; }
+    h2 { font-size: 16px; margin: 0 0 8px; }
+    a { color: var(--accent); }
+    .muted { color: var(--muted); font-size: 14px; }
+    .who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    input {
+      font: inherit; padding: 6px 8px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--panel); color: var(--text);
+    }
+    #board { width: 160px; padding: 2px 6px; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+    .card ol { margin: 0 0 12px; padding-left: 20px; }
+    .card .row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .card .row input { flex: 1; min-width: 200px; font-family: ui-monospace, monospace; }
+    textarea {
+      flex: 1; min-height: 50vh; width: 100%; resize: vertical; padding: 14px;
+      font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    }
+    textarea:focus, input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    button {
+      font: inherit; padding: 8px 16px; border-radius: 8px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    }
+    button.small { padding: 2px 10px; font-size: 13px; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+    button:disabled { opacity: .6; cursor: default; }
+    #status { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .ok { color: var(--ok) !important; } .err { color: var(--err) !important; }
+    .hint { color: var(--muted); font-size: 13px; margin: 0; }
+    kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Paste Board</h1>
+    <div class="who" id="who" hidden>
+      <label class="muted">Board: <input id="board" spellcheck="false" maxlength="64" title="Letters, numbers, - and _"></label>
+      <span class="muted" id="login"></span>
+      <button class="small" id="signout" title="Forget the token on this computer">Sign out</button>
+    </div>
+  </header>
+
+  <section class="card" id="setup" hidden>
+    <h2>Connect this computer</h2>
+    <p class="muted" style="margin-top:0">Your text is stored in a private (secret) GitHub Gist on your own account, so every computer you sign in on sees the same board.</p>
+    <ol class="muted">
+      <li><a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Online%20Paste%20Board" target="_blank" rel="noopener">Create a GitHub token</a> with only the <b>gist</b> scope (pick an expiration you're comfortable with).</li>
+      <li>Paste it below. It is saved only in this browser.</li>
+      <li>Repeat on your other computer (you can reuse the same token).</li>
+    </ol>
+    <form class="row" id="setup-form">
+      <input id="token" type="password" placeholder="ghp_… or github_pat_…" autocomplete="off" spellcheck="false" required>
+      <button class="primary" type="submit" id="connect">Connect</button>
+    </form>
+    <p class="hint" id="setup-status" role="status" style="margin-top:8px"></p>
+  </section>
+
+  <div id="app" hidden style="display:contents">
+    <textarea id="content" placeholder="Paste or type anything here, then click Save…" spellcheck="false"></textarea>
+    <div class="bar">
+      <button id="save" class="primary">Save</button>
+      <button id="copy">Copy</button>
+      <button id="reload">Reload</button>
+      <button id="clear">Clear</button>
+      <span id="status" role="status"></span>
+    </div>
+    <p class="hint">Open this page on another computer to see what you saved. <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> saves. <span id="gistlink"></span></p>
+  </div>
+</main>
+
+<script>
+  const API = 'https://api.github.com';
+  const GIST_DESCRIPTION = 'Online Paste Board';
+  const VALID = /^[A-Za-z0-9_-]{1,64}$/;
+  const POLL_MS = 10000;
+
+  const $ = (id) => document.getElementById(id);
+  const content = $('content'), status = $('status'), boardInput = $('board');
+
+  // localStorage can throw (private mode, blocked storage) — treat as empty.
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+    del(k) { try { localStorage.removeItem(k); } catch {} },
+  };
+
+  let token = store.get('pb_token');
+  let gistId = store.get('pb_gist');
+  let board = 'default';
+  let savedText = '';
+  let fileExists = false;
+  let busy = false;
+
+  const fileName = () => board + '.txt';
+  const dirty = () => content.value !== savedText;
+
+  function setStatus(text, kind = '') {
+    status.textContent = text;
+    status.className = kind;
+  }
+
+  async function gh(path, { method = 'GET', body, auth = token } = {}) {
+    const res = await fetch(API + path, {
+      method,
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: 'Bearer ' + auth,
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (res.status === 401) {
+      signOut('Your token was rejected (expired or revoked). Please connect again.');
+      throw new Error('Unauthorized');
+    }
+    const data = res.status === 204 ? null : await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.message) || res.statusText);
+    return data;
+  }
+
+  // Reuse the board gist if one exists on the account, so a second computer
+  // finds the same storage with nothing but the token.
+  async function ensureGist() {
+    if (gistId) return gistId;
+    for (let page = 1; page <= 10; page++) {
+      const list = await gh(`/gists?per_page=100&page=${page}`);
+      const found = list.find((g) => g.description === GIST_DESCRIPTION);
+      if (found) { gistId = found.id; break; }
+      if (list.length < 100) break;
+    }
+    if (!gistId) {
+      const created = await gh('/gists', {
+        method: 'POST',
+        body: {
+          description: GIST_DESCRIPTION,
+          public: false,
+          files: { 'README.md': { content: 'Storage for Online Paste Board. Each board is a .txt file in this gist.\n' } },
+        },
+      });
+      gistId = created.id;
+    }
+    store.set('pb_gist', gistId);
+    return gistId;
+  }
+
+  async function fetchGist() {
+    try {
+      return await gh('/gists/' + (await ensureGist()));
+    } catch (err) {
+      // The remembered gist was deleted — look it up again / recreate it.
+      if (err.message === 'Not Found' && gistId) {
+        gistId = null;
+        store.del('pb_gist');
+        return gh('/gists/' + (await ensureGist()));
+      }
+      throw err;
+    }
+  }
+
+  async function fileContent(file) {
+    if (!file) return '';
+    if (!file.truncated) return file.content;
+    // Large files are truncated in the API response; fetch the raw text.
+    const res = await fetch(file.raw_url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Could not download large board');
+    return res.text();
+  }
+
+  async function load({ force = false } = {}) {
+    if (busy) return;
+    busy = true;
+    try {
+      if (force) setStatus('Loading…');
+      const gist = await fetchGist();
+      $('gistlink').innerHTML = '';
+      const link = Object.assign(document.createElement('a'), { href: gist.html_url, target: '_blank', rel: 'noopener', textContent: 'View storage gist' });
+      $('gistlink').append(link);
+
+      const file = gist.files[fileName()];
+      const remote = await fileContent(file);
+      fileExists = Boolean(file);
+      if (remote === savedText && !force) return;
+      // Don't clobber unsaved local edits during background refreshes.
+      if (dirty() && !force) {
+        setStatus('Newer version saved elsewhere — click Reload', 'err');
+        return;
+      }
+      content.value = savedText = remote;
+      setStatus(fileExists ? 'Last saved ' + new Date(gist.updated_at).toLocaleString() : 'Nothing saved on this board yet');
+    } catch (err) {
+      if (err.message !== 'Unauthorized') setStatus('Load failed: ' + err.message, 'err');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function save() {
+    $('save').disabled = true;
+    busy = true;
+    setStatus('Saving…');
+    try {
+      const text = content.value;
+      // Gists can't hold blank files, so an empty board deletes its file.
+      const blank = text.trim() === '';
+      if (!(blank && !fileExists)) {
+        await gh('/gists/' + (await ensureGist()), {
+          method: 'PATCH',
+          body: { files: { [fileName()]: blank ? null : { content: text } } },
+        });
+      }
+      savedText = text;
+      fileExists = !blank;
+      setStatus('Saved ✓ ' + new Date().toLocaleTimeString(), 'ok');
+    } catch (err) {
+      if (err.message !== 'Unauthorized') setStatus('Save failed: ' + err.message, 'err');
+    } finally {
+      $('save').disabled = false;
+      busy = false;
+    }
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(content.value);
+    } catch {
+      content.select();
+      document.execCommand('copy');
+    }
+    setStatus('Copied to clipboard ✓', 'ok');
+  }
+
+  function readBoardFromHash() {
+    const name = decodeURIComponent(location.hash.slice(1));
+    board = VALID.test(name) ? name : 'default';
+    boardInput.value = board;
+    savedText = '';
+    content.value = '';
+    fileExists = false;
+  }
+
+  function showSetup(message = '', kind = '') {
+    $('setup').hidden = false;
+    $('app').hidden = true;
+    $('who').hidden = true;
+    $('setup-status').textContent = message;
+    $('setup-status').className = 'hint ' + kind;
+  }
+
+  async function showApp() {
+    $('setup').hidden = true;
+    $('app').hidden = false;
+    $('who').hidden = false;
+    $('login').textContent = store.get('pb_login') ? '@' + store.get('pb_login') : '';
+    readBoardFromHash();
+    await load({ force: true });
+  }
+
+  function signOut(message) {
+    token = null;
+    gistId = null;
+    ['pb_token', 'pb_gist', 'pb_login'].forEach(store.del);
+    content.value = savedText = '';
+    showSetup(message || 'Signed out on this computer.', message ? 'err' : '');
+  }
+
+  $('setup-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const candidate = $('token').value.trim();
+    $('connect').disabled = true;
+    $('setup-status').textContent = 'Checking token…';
+    $('setup-status').className = 'hint';
+    try {
+      const res = await fetch(API + '/user', {
+        cache: 'no-store',
+        headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + candidate },
+      });
+      if (!res.ok) throw new Error(res.status === 401 ? 'GitHub rejected that token' : res.statusText);
+      const scopes = res.headers.get('X-OAuth-Scopes');
+      if (scopes !== null && !scopes.split(',').map((s) => s.trim()).includes('gist')) {
+        throw new Error('That token is missing the "gist" scope');
+      }
+      const user = await res.json();
+      token = candidate;
+      store.set('pb_token', token);
+      store.set('pb_login', user.login);
+      $('token').value = '';
+      await showApp();
+    } catch (err) {
+      showSetup(err.message, 'err');
+    } finally {
+      $('connect').disabled = false;
+    }
+  });
+
+  $('save').onclick = save;
+  $('copy').onclick = copy;
+  $('reload').onclick = () => load({ force: true });
+  $('clear').onclick = () => { content.value = ''; content.focus(); setStatus('Cleared — click Save to store'); };
+  $('signout').onclick = () => { if (!dirty() || confirm('Discard unsaved changes?')) signOut(); };
+
+  content.addEventListener('input', () => { if (dirty()) setStatus('Unsaved changes'); });
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (token) save(); }
+  });
+
+  boardInput.addEventListener('change', () => {
+    const name = boardInput.value.trim();
+    if (!VALID.test(name)) { boardInput.value = board; setStatus('Board names: letters, numbers, - and _', 'err'); return; }
+    if (dirty() && !confirm('Discard unsaved changes?')) { boardInput.value = board; return; }
+    savedText = content.value; // suppress the dirty prompt in hashchange
+    location.hash = name === 'default' ? '' : name;
+  });
+
+  window.addEventListener('hashchange', () => { if (token) { readBoardFromHash(); load({ force: true }); } });
+  window.addEventListener('beforeunload', (e) => { if (dirty()) e.preventDefault(); });
+
+  setInterval(() => { if (token && !document.hidden) load(); }, POLL_MS);
+  document.addEventListener('visibilitychange', () => { if (token && !document.hidden) load(); });
+
+  if (token) showApp(); else showSetup();
+</script>
+</body>
+</html>
