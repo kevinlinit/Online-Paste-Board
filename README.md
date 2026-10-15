@@ -23,9 +23,8 @@ The token is kept only in that browser's `localStorage`; **Sign out** removes it
 Only sign in on computers you trust, and give the token an expiration date.
 Secret gists are unlisted, not encrypted: anyone who has the gist's URL can read it.
 
-Deployment: `.github/workflows/pages.yml` publishes `index.html` on every push to `master`
-(repo **Settings → Pages → Source: GitHub Actions**). With **Deploy from a branch →
-master / (root)** the root `index.html` is served as is.
+Deployment: GitHub Pages serves the repo root of `master` (**Settings → Pages →
+Deploy from a branch → master / (root)**), so every push to `master` redeploys `index.html`.
 
 ## Self-hosted server version
 
